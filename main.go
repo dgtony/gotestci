@@ -173,17 +173,22 @@ func PrintResults(testPipelinePassed bool, coverage float64, emptyPkgs int, tota
 	}
 
 	pkgsWithTests := 100 * (1 - float64(emptyPkgs)/float64(totalPkgsTested))
-	//fmt.Printf("status: %s, coverage: %.1f%%, packages tested: %d, packages without tests: %d\n", status, coverage, totalPkgsTested, emptyPkgs)
 	fmt.Printf("status: %s, coverage: %.1f%%, packages with tests: %.1f%%\n", status, coverage, pkgsWithTests)
 }
 
 func main() {
-	// todo choose coverage mode
 	var excludedPkgs Packages
 	var showProgress bool
-	flag.Var(&excludedPkgs, "e", "exclude package from testing pipeline")
+	var coverMode string
 	flag.BoolVar(&showProgress, "p", false, "show current progress of test pipeline")
+	flag.StringVar(&coverMode, "m", "set", "test coverage mode: set/count/atomic")
+	flag.Var(&excludedPkgs, "e", "exclude package from testing pipeline")
 	flag.Parse()
+
+	if coverMode != COVERAGE_MODE_SET && coverMode != COVERAGE_MODE_COUNT && coverMode != COVERAGE_MODE_ATOMIC {
+		fmt.Printf("bad coverage mode: %s\n", coverMode)
+		return
+	}
 
 	pkgs, err := getAllPkgs()
 	if err != nil {
@@ -201,12 +206,7 @@ func main() {
 		fmt.Printf("error: cannot create file for results: %s\n", err)
 		return
 	}
-
-	// set coverage mode
-	coverMode := COVERAGE_MODE_SET
 	WriteCoverMode(resultFD, coverMode)
-
-	// todo set signal handlers
 
 	// run all tests
 	testsPassed, emptyPkgs, totalTested := RunTests(pkgs, excludedPkgs, resultFD, coverMode, showProgress)
@@ -218,7 +218,6 @@ func main() {
 		return
 	}
 
-	// remove temp files
 	resultFD.Close()
 	CleanFiles()
 
