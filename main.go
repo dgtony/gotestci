@@ -43,6 +43,25 @@ func (p *Packages) Set(s string) error {
 	return nil
 }
 
+func strInSlice(str string, strSlice []string) bool {
+	for _, s := range strSlice {
+		if str == s {
+			return true
+		}
+	}
+	return false
+}
+
+func cleanFiles() {
+	os.Remove(RESULT_FILE)
+	os.Remove(TMP_FILE)
+}
+
+func writeCoverMode(resultFile *os.File, coverMode string) {
+	coverModeHeader := fmt.Sprintf("mode: %s\n", coverMode)
+	resultFile.Write([]byte(coverModeHeader))
+}
+
 func getAllPkgs() ([]string, error) {
 	cmd := exec.Command("go", "list", "./...")
 
@@ -55,6 +74,40 @@ func getAllPkgs() ([]string, error) {
 
 	pkgs := strings.Split(out.String(), "\n")
 	return pkgs[:len(pkgs)-1], err
+}
+
+func combinedCoverage() (float64, error) {
+	cmd := exec.Command("go", "tool", "cover", fmt.Sprintf("-func=%s", RESULT_FILE))
+
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	err := cmd.Run()
+	if err != nil {
+		return 0, err
+	}
+
+	res := strings.Split(out.String(), "\n")
+	totalCoverageStr := res[len(res)-2]
+
+	// parse string and return percent only
+	re, err := regexp.Compile(`total:[ \t]+\([a-z]+\)[ \t]+(?P<Percent>[0-9]*\.[0-9]*)`)
+	if err != nil {
+		panic("cannot compile regexp pattern")
+	}
+
+	parsedResult := re.FindStringSubmatch(totalCoverageStr)
+	if len(res) < 2 {
+		fmt.Println("cannot parse coverage result")
+		return 0, errors.New("coverage parsing failed")
+	}
+
+	coveragePercent, err := strconv.ParseFloat(parsedResult[1], 64)
+	if err != nil {
+		fmt.Printf("cannot convert coverage value %s\n", parsedResult[1])
+		return 0, errors.New("converting coverage value failed")
+	}
+
+	return coveragePercent, nil
 }
 
 func testSinglePkg(pkgName string, resultFile *os.File, coverMode string) TestResult {
@@ -92,51 +145,7 @@ func testSinglePkg(pkgName string, resultFile *os.File, coverMode string) TestRe
 	return TEST_RES_PASSED
 }
 
-func combinedCoverage() (float64, error) {
-	cmd := exec.Command("go", "tool", "cover", fmt.Sprintf("-func=%s", RESULT_FILE))
-
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	err := cmd.Run()
-	if err != nil {
-		return 0, err
-	}
-
-	res := strings.Split(out.String(), "\n")
-	totalCoverageStr := res[len(res)-2]
-
-	// parse string and return percent only
-	re, err := regexp.Compile(`total:[ \t]+\([a-z]+\)[ \t]+(?P<Percent>[0-9]*\.[0-9]*)`)
-	if err != nil {
-		panic("cannot compile regexp pattern")
-	}
-
-	parsedResult := re.FindStringSubmatch(totalCoverageStr)
-	if len(res) < 2 {
-		fmt.Println("cannot parse coverage result")
-		return 0, errors.New("coverage parsing failed")
-	}
-
-	coveragePercent, err := strconv.ParseFloat(parsedResult[1], 64)
-	if err != nil {
-		fmt.Printf("cannot convert coverage value %s\n", parsedResult[1])
-		return 0, errors.New("converting coverage value failed")
-	}
-
-	return coveragePercent, nil
-}
-
-func CleanFiles() {
-	os.Remove(RESULT_FILE)
-	os.Remove(TMP_FILE)
-}
-
-func WriteCoverMode(resultFile *os.File, coverMode string) {
-	coverModeHeader := fmt.Sprintf("mode: %s\n", coverMode)
-	resultFile.Write([]byte(coverModeHeader))
-}
-
-func RunTests(pkgs, exPkgs Packages, resultFD *os.File, coverMode string, showProgress bool) (passed bool, empty int, total int) {
+func runTests(pkgs, exPkgs Packages, resultFD *os.File, coverMode string, showProgress bool) (passed bool, empty int, total int) {
 	testPipelineStatus := true
 	emptyPkgs := 0
 	totalTested := 0
@@ -164,7 +173,7 @@ func RunTests(pkgs, exPkgs Packages, resultFD *os.File, coverMode string, showPr
 	return testPipelineStatus, emptyPkgs, totalTested
 }
 
-func PrintResults(testPipelinePassed bool, coverage float64, emptyPkgs int, totalPkgsTested int) {
+func printResults(testPipelinePassed bool, coverage float64, emptyPkgs int, totalPkgsTested int) {
 	var status string
 	if testPipelinePassed {
 		status = "passed"
@@ -200,16 +209,16 @@ func main() {
 		return
 	}
 
-	CleanFiles()
+	cleanFiles()
 	resultFD, err := os.OpenFile(RESULT_FILE, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0660)
 	if err != nil {
 		fmt.Printf("error: cannot create file for results: %s\n", err)
 		return
 	}
-	WriteCoverMode(resultFD, coverMode)
+	writeCoverMode(resultFD, coverMode)
 
 	// run all tests
-	testsPassed, emptyPkgs, totalTested := RunTests(pkgs, excludedPkgs, resultFD, coverMode, showProgress)
+	testsPassed, emptyPkgs, totalTested := runTests(pkgs, excludedPkgs, resultFD, coverMode, showProgress)
 
 	// process combined coverage profile
 	coverage, err := combinedCoverage()
@@ -219,16 +228,7 @@ func main() {
 	}
 
 	resultFD.Close()
-	CleanFiles()
+	cleanFiles()
 
-	PrintResults(testsPassed, coverage, emptyPkgs, totalTested)
-}
-
-func strInSlice(str string, strSlice []string) bool {
-	for _, s := range strSlice {
-		if str == s {
-			return true
-		}
-	}
-	return false
+	printResults(testsPassed, coverage, emptyPkgs, totalTested)
 }
