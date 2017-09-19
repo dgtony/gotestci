@@ -210,6 +210,8 @@ func main() {
 	}
 
 	cleanFiles()
+	defer cleanFiles()
+
 	resultFD, err := os.OpenFile(RESULT_FILE, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0660)
 	if err != nil {
 		fmt.Printf("error: cannot create file for results: %s\n", err)
@@ -228,7 +230,6 @@ func main() {
 	}
 
 	resultFD.Close()
-	cleanFiles()
 
 	printResults(testsPassed, coverage, emptyPkgs, totalTested)
 }
